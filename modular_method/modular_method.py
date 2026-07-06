@@ -1,11 +1,12 @@
-from sage.all import (ZZ, EllipticCurve, Newforms, prime_range, gcd)
+from sage.all import (ZZ, EllipticCurve, Newforms, prime_range, gcd, prod)
 
 class CubicLebesgueNagellModularMethod:
 
     def __init__(self, d):
         self.d = d
-        self.D = -d if d % 3 == 2 else d
+        self.D = ZZ(-d) if d % 3 == 2 else ZZ(d)
         self._levels_info = self._frey_curves_info()
+        self._small_exponents = []
 
     def _frey_curves_info(self):
         Nn = prod([p for p in self.D.prime_factors() if p != 3])
@@ -23,11 +24,10 @@ class CubicLebesgueNagellModularMethod:
             ]
         else:
             info = [
-                {'Nn': 3 * Nn, 'frey_curve': lambda x: EllipticCurve([3 * x, 0, x**3 - self.D, 0, 0])}
-                {'Nn': 3**2 * Nn, 'frey_curve': lambda x: EllipticCurve([3 * x, 0, self.D, 0, 0])}
+                {'Nn': 3 * Nn, 'frey_curve': lambda x: EllipticCurve([3 * x, 0, x**3 - self.D, 0, 0])},
+                {'Nn': 3**2 * Nn, 'frey_curve': lambda x: EllipticCurve([3 * x, 0, self.D, 0, 0])},
                 {'Nn': 3**3 * Nn, 'frey_curve': lambda x: EllipticCurve([3 * x, 0, self.D, 0, 0])}
             ]
-            levels = [3 * Nn, 3**2 * Nn, 3**3 * Nn]
         return info
 
     def elimination_method_trace_of_frobenius(self, primes_bound=50):
@@ -36,7 +36,7 @@ class CubicLebesgueNagellModularMethod:
             Nn = level_info['Nn']
             Ex = level_info['frey_curve']
 
-            print(f"Elimination step for level {Nn}.")
+            print(f"##### Elimination step for level {Nn}. #####")
 
             newforms = Newforms(Nn, names='a')
 
@@ -56,8 +56,12 @@ class CubicLebesgueNagellModularMethod:
                             Bnewf.append(Bp)
 
                 if len(Bnewf) != 0:
-                    small_exp_newf = gcd(Bnewf).prime_factors()
-                    print(f"Small exponents for this newform: {small_exp_newf}")
+                    small_exp_newf = ZZ(gcd(Bnewf)).prime_factors()
+                    for p in small_exp_newf:
+                        if p not in self._small_exponents:
+                            self._small_exponents.append(p)
                 else:
                     print(f"We could not eliminate this newform!")
+
+        print(f"Small exponents are {self._small_exponents}.")
 
