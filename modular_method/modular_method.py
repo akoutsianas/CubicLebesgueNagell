@@ -7,6 +7,7 @@ class CubicLebesgueNagellModularMethod:
         self.D = ZZ(-d) if d % 3 == 2 else ZZ(d)
         self._levels_info = self._frey_curves_info()
         self._small_exponents = []
+        self._not_eliminated_newforms = []
 
     def _frey_curves_info(self):
         Nn = prod([p for p in self.D.prime_factors() if p != 3])
@@ -39,7 +40,7 @@ class CubicLebesgueNagellModularMethod:
             print(f"##### Elimination step for level {Nn}. #####")
 
             newforms = Newforms(Nn, names='a')
-
+            not_eliminated_newforms = {'level': Nn, "Ex": Ex, 'newforms': []}
             for newf in newforms:
                 Bnewf = []
                 for p in prime_range(primes_bound):
@@ -61,7 +62,11 @@ class CubicLebesgueNagellModularMethod:
                         if p not in self._small_exponents:
                             self._small_exponents.append(p)
                 else:
+                    not_eliminated_newforms['newforms'].append(newf.abelian_variety().elliptic_curve())
                     print(f"We could not eliminate this newform!")
-
+            if len(not_eliminated_newforms['newforms']) > 0:
+                self._not_eliminated_newforms.append(not_eliminated_newforms)
+        self._small_exponents.sort()
         print(f"Small exponents are {self._small_exponents}.")
+        print(f"Not eliminated newforms {self._not_eliminated_newforms}.")
 
