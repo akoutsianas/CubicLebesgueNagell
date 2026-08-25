@@ -28,6 +28,6 @@ for d in range(2, D_BOUND + 1):
                         if b == d:
                             sols.append((x0, y0, d, k))
             except:
-                print(f"We couldn't compute the S-integral points of {E0} for d={d} and S={S}")
+                print(f"We couldn't compute the S-integral points of {E0} for d={d}, k0={k0} and S={S}.")
 
 print(f"The solutions are {sols}.")
