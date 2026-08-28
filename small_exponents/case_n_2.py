@@ -26,10 +26,11 @@ def case_n_2(d):
 
 
 def _s_integral_points(d, sign):
+    sols = []
     problematic_k0s = []
     S = ZZ(d).prime_factors()
     for k0 in range(6):
-        E0 = E0min = EllipticCurve([0, sign * d ^ k0])
+        E0 = E0min = EllipticCurve([0, sign * d ** k0])
         if not E0.is_minimal():
             E0min = E0.minimal_model()
         phi = E0min.isomorphism_to(E0)
@@ -42,7 +43,7 @@ def _s_integral_points(d, sign):
                 P0 = phi(pt)
                 x0 = P0[0].denominator()
                 y0 = P0[1].denominator()
-                dk = x0 ^ 3 - y0 ^ 2
+                dk = x0 ** 3 - y0 ** 2
                 if dk.is_perfect_power():
                     b, k = dk.perfect_power()
                     if b == d:
@@ -56,7 +57,7 @@ def _s_integral_points(d, sign):
 
 def _minus_reducible_cubic_even_case(d, k0):
     sols = []
-    E = EllipticCurve([0, 0, 18 * d^(ZZ(k0/2)), 0, -108 * d^k0])
+    E = EllipticCurve([0, 0, 18 * d**(ZZ(k0/2)), 0, -108 * d**k0])
     S = ZZ(d).prime_factors()
     if 2 not in S:
         S.append(2)
@@ -65,7 +66,11 @@ def _minus_reducible_cubic_even_case(d, k0):
     for p in iso.u.denominator().prime_factors():
         if p not in S:
             S.append(p)
-    pts = Emin.S_integral_points(S=S)
+    try:
+        pts = Emin.S_integral_points(S=S)
+    except:
+        print(f"We couldn't compute the S-integral points of elliptic curve associate to the reducible cubic form "
+              f"for the sign={-1} and d={d} and k0={k0}.")
 
     for pt in pts:
         pt0 = iso(pt)
@@ -75,13 +80,13 @@ def _minus_reducible_cubic_even_case(d, k0):
             continue
         _, lam = denom0.perfect_power()
         x1 = fr0.numerator()
-        x2 = x1^3 - 2*d^(3*lam + ZZ(k0/2))
+        x2 = x1**3 - 2*d**(3*lam + ZZ(k0/2))
         b, e = x2.perfect_power()
         if e % 3 == 0:
-            x2 = b^(ZZ(e/3))
+            x2 = b**(ZZ(e/3))
         k = 6*lam + k0
         x0 = x1 * x2
-        y2 = x0^3 + d^k
+        y2 = x0**3 + d**k
         if y2.is_square():
             y0 = ZZ(sqrt(y2))
             sols.append((x0, y0, d, k))
