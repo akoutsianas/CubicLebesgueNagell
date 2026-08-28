@@ -1,27 +1,30 @@
-from sage.all import (EllipticCurve, ZZ, EllipticCurve_from_cubic, polygen, QQ, sqrt)
+from sage.all import (EllipticCurve, ZZ, EllipticCurve_from_cubic, polygen, QQ, sqrt, prod)
 
 from config import D_BOUND
 
 
-def case_n_2(d):
+##### Integer solutions of the equation y^2 \pm d^k = x^3 ####
+
+#### The case y^2 - d^k = x^3
+
+def case_n_2_minus(d):
     sols = []
-    for sign in [1, -1]:
-        sols_sign, problematic_k0s = _s_integral_points(d, sign)
-        sols.append(sols_sign)
-        for k0 in problematic_k0s:
-            if sign == -1:
-                if k0 % 2 == 0:
-                    sols_k0 = _minus_reducible_cubic_even_case(d, k0)
-                else:
-                    sols_k0 = []
-            else:
-                if k0 % 2 == 0:
-                    sols_k0 = []
-                else:
-                    sols_k0 = []
-            for sol in sols_k0:
-                if sol not in sols:
-                    sols.append(sol)
+    sols_sign, problematic_k0s = _s_integral_points(d, -1)
+    sols.append(sols_sign)
+
+    sols_temp = []
+    even_k0 = (0 in problematic_k0s) or (2 in problematic_k0s) or (4 in problematic_k0s)
+    odd_k0 = (1 in problematic_k0s) or (3 in problematic_k0s) or (5 in problematic_k0s)
+    if even_k0:
+        sols_temp += _minus_irreducible_cubic_even_case(d)
+    for k0 in problematic_k0s:
+        if k0 % 2 == 0:
+            sols_temp += _minus_reducible_cubic_even_case(d, k0)
+        else:
+            sols_temp += []
+    for sol in sols_temp:
+        if sol not in sols:
+            sols.append(sol)
     return sols
 
 
@@ -43,7 +46,7 @@ def _s_integral_points(d, sign):
                 P0 = phi(pt)
                 x0 = P0[0].denominator()
                 y0 = P0[1].denominator()
-                dk = x0 ** 3 - y0 ** 2
+                dk = sign * (x0 ** 3 - y0 ** 2)
                 if dk.is_perfect_power():
                     b, k = dk.perfect_power()
                     if b == d:
@@ -92,3 +95,25 @@ def _minus_reducible_cubic_even_case(d, k0):
             sols.append((x0, y0, d, k))
     return sols
 
+
+def _minus_irreducible_cubic_even_case(d):
+    sols = []
+    S = ZZ(d).prime_factors()
+    f1 = [1, 0, 0, -2]
+    f2 = [2, 0, 0, -1]
+    tms1 = ThueMahlerSolver(f1, S).solve()
+    tms2 = ThueMahlerSolver(f2, S).solve()
+
+    for sol in tms1 + tms2:
+        x1 = sol[0]
+        x2 = sol[1]
+        dk = prod([p^e for p,e in sol[2].items()])
+        if dk.is_power_of(d):
+            _, e = dk.perfect_power()
+            k = 2 * e
+            x0 = 2*x1*x2
+            y02 = x0**3 + d**k
+            if y02.is_square() and x0 != 0 and k > 0:
+                y0 = ZZ(sqrt(y02))
+                sols.append((x0, y0, d, k))
+    return sols
