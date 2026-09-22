@@ -552,50 +552,46 @@ def case_n_2_plus(d):
 
 def _plus_even_case(d):
     r"""
-    k even, plus case: over Q(i), Lemma 3.6 gives coprime a, b with
-        d^{k/2} = b(3a^2 - b^2),  x = a^2 + b^2,  y = a(a^2 - 3b^2).
-    The cubic b(3a^2 - b^2) is reducible, so we use Section 2.3.  The unit
-    i = -1, -i choices give the swapped parametrisation a(a^2 - 3b^2).
+    k even, plus case (Lemma 3.7).  Let K = Q(i); we have
+        (y + d^{k/2} i)(y - d^{k/2} i) = x^3
+    and the two factors are coprime.  Hence (3.19)
+        y + d^{k/2} i = (a + bi)^3
+    for coprime integers a, b.  The units of Z[i] are cubes (indeed i = (-i)^3,
+    -1 = (-1)^3), so they are absorbed by the signs/order of a and b; the
+    single case above is therefore exhaustive.  With
+        (a + bi)^3 = U(a,b) + V(a,b) i,
+        U(a,b) = a(a^2 - 3b^2),   V(a,b) = b(3a^2 - b^2),
+    we get
+        d^{k/2} = V,  y = U,  x = a^2 + b^2.
+    (The closed forms printed in Lemma 3.7, b(2b^2+3a^2) and a(-3b^2+2a^2),
+    are a typo: they contradict y + d^{k/2} i = (a+bi)^3.)
+    The cubic b(3a^2 - b^2) is reducible (linear times irreducible quadratic),
+    so we use the Section 2.3 method.
     """
     sols = []
     S = ZZ(d).prime_factors()
     R = PolynomialRing(QQ, ["a", "b"])
     aa, bb = R.gens()
 
-    q1 = 3 * aa ** 2 - bb ** 2           # 3a^2 - b^2;  cubic = b * q1
-    Q1 = q1(bb, aa)                      # swap so the linear factor is X = b
+    # (a + bi)^3 = U(a,b) + V(a,b) i
+    U = aa * (aa ** 2 - 3 * bb ** 2)     # a(a^2 - 3b^2)
+    V = bb * (3 * aa ** 2 - bb ** 2)     # b(3a^2 - b^2)
 
-    def rec1(e, X, Y):
-        a0, b0 = Y, X                    # X = b, Y = a
+    def rec(e, X, Y):
+        a0, b0 = Y, X                    # X = b (linear factor), Y = a
         k = 2 * e
         if k < 1:
             return None
         x0 = a0 ** 2 + b0 ** 2
         if gcd(x0, d) != 1:
             return None
-        y0 = a0 * (a0 ** 2 - 3 * b0 ** 2)
+        y0 = U(a0, b0)
         if y0 ** 2 + d ** k != x0 ** 3:
             return None
         return (x0, y0, d, k)
 
-    sols += _reducible_cubic_thue_mahler(Q1, ZZ(1), d, S, rec1)
-
-    q2 = aa ** 2 - 3 * bb ** 2           # a^2 - 3b^2;  cubic = a * q2
-
-    def rec2(e, X, Y):
-        a0, b0 = X, Y                    # X = a, Y = b
-        k = 2 * e
-        if k < 1:
-            return None
-        x0 = a0 ** 2 + b0 ** 2
-        if gcd(x0, d) != 1:
-            return None
-        y0 = b0 * (b0 ** 2 - 3 * a0 ** 2)
-        if y0 ** 2 + d ** k != x0 ** 3:
-            return None
-        return (x0, y0, d, k)
-
-    sols += _reducible_cubic_thue_mahler(q2, ZZ(1), d, S, rec2)
+    Q = (R(V / bb))(bb, aa)              # 3a^2 - b^2, linear factor = 1st var
+    sols += _reducible_cubic_thue_mahler(Q, ZZ(1), d, S, rec)
     return sols
 
 
