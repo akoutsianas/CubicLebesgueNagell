@@ -44,7 +44,7 @@ D_BOUND = 100
 
 # The twelve values of d for which Q(sqrt(-d)) has class number divisible by 3
 # (Lemma 3.9).
-_PLUS_ODD_D0 = {23, 26, 29, 31, 38, 53, 59, 61, 83, 87, 89, 92}
+_PLUS_ODD_CLASS_NUMBER_NON_COPRIME_TO_THREE = {23, 26, 29, 31, 38, 53, 59, 61, 83, 87, 89, 92}
 
 # Development flag.  The Section 2.3 branches (SUnitsSumSquare) are expensive;
 # while validating the pipeline we may skip them.
@@ -434,6 +434,8 @@ def _minus_odd_general(d):
             # Q(X, Y) = f2(Y, X),  c = d1.
             Rq = F.parent()
             aq, bq = Rq.gens()
+            if F % bq != 0:
+                raise ValueError("reducible case: b does not divide F")
             q = Rq(F / bq)
             d1 = lcm([cf.denominator() for cf in q.coefficients()])
             f2 = d1 * q
@@ -441,7 +443,7 @@ def _minus_odd_general(d):
 
             def rec23(e, X, Y):
                 return rec(e, Y, X)
-            sols += _reducible_cubic_thue_mahler(Q, ZZ(d1), d, S, rec23)
+            sols += _reducible_cubic_thue_mahler(Q, d1, d, S, rec23)
     return sols
 
 
@@ -489,6 +491,8 @@ def _minus_odd_d_79():
                 # Section 2.3 with the linear factor X = b, Y = a.
                 Rq = F.parent()
                 aq, bq = Rq.gens()
+                if F % bq != 0:
+                    raise ValueError("reducible case: b does not divide F")
                 qp = F / bq
                 Q = qp(bq, aq)
 
@@ -607,14 +611,14 @@ def _zeta3_in_K(K, d):
 
 
 def _plus_odd_case(d):
-    if d in _PLUS_ODD_D0:
-        return _plus_odd_D0(d)
+    if d in _PLUS_ODD_CLASS_NUMBER_NON_COPRIME_TO_THREE:
+        return _plus_odd_class_number_non_coprime_to_three(d)
     return _plus_odd_general(d)
 
 
 def _plus_odd_general(d):
     r"""
-    k odd, plus case, d not in _PLUS_ODD_D0: K = Q(sqrt(-d)), h_K coprime to 3.
+    k odd, plus case, d not in _PLUS_ODD_CLASS_NUMBER_NON_COPRIME_TO_THREE: K = Q(sqrt(-d)), h_K coprime to 3.
     Lemma 3.8: coprime a, b and t (with zeta_3 if zeta_3 in K) satisfy
         d^{(k-1)/2} = (zeta_3^t (a + b omega)^3
                        - zeta_3^{-t}(a + b omega_bar)^3)/(2 sqrt(-d)),
@@ -645,37 +649,58 @@ def _plus_odd_general(d):
         ztb = bzeta ** t
         F = ((zt * (aa + omega * bb) ** 3 - ztb * (aa + bomega * bb) ** 3)
              / (2 * r)).change_ring(QQ)
-        f = F.numerator()
-        c = F.denominator()
-        if not f.is_irreducible():
-            continue
-        try:
-            tm_sols = ThueMahlerSolver(f, S, a=c).solve()
-        except Exception as e:
-            print(f"Thue-Mahler failed for plus odd, d={d}, t={t}: {e}")
-            continue
-        for sol in tm_sols:
-            a0, b0 = sol[0], sol[1]
-            e = _tm_exponent(sol, d)
-            if e is None:
-                continue
+
+        def rec(e, a0, b0, zt=zt, ztb=ztb):
             k = 2 * e + 1
             yK = (zt * (a0 + omega * b0) ** 3
                   + ztb * (a0 + bomega * b0) ** 3) / 2
             y0 = QQ(yK)
             if y0.denominator() != 1:
-                continue
+                return None
             y0 = ZZ(y0)
-            xc = y0 ** 2 + d ** k
-            x0 = _cube_root(xc)
-            if x0 is not None:
-                sols.append((x0, y0, d, k))
+            x0 = _cube_root(y0 ** 2 + d ** k)
+            if x0 is None:
+                return None
+            return (x0, y0, d, k)
+
+        nonconst = [pol for pol, _ in F.factor() if pol.degree() > 0]
+        if len(nonconst) == 1:
+            # irreducible (always t != 0): cubic Thue-Mahler equation.
+            f = F.numerator()
+            c = F.denominator()
+            try:
+                tm_sols = ThueMahlerSolver(f, S, a=c).solve()
+            except Exception as e:
+                print(f"Thue-Mahler failed for plus odd, d={d}, t={t}: {e}")
+                continue
+            for sol in tm_sols:
+                e = _tm_exponent(sol, d)
+                if e is None:
+                    continue
+                out = rec(e, sol[0], sol[1])
+                if out is not None:
+                    sols.append(out)
+        else:
+            # reducible (always t = 0): F(a, b) = b * f2(a, b) / d1.  Swap so
+            # that the linear factor is the first variable and use Section 2.3.
+            Rq = F.parent()
+            aq, bq = Rq.gens()
+            if F % bq != 0:
+                raise ValueError("reducible case: b does not divide F")
+            q = Rq(F / bq)
+            d1 = lcm([cf.denominator() for cf in q.coefficients()])
+            f2 = d1 * q
+            Q = f2(bq, aq)
+
+            def rec23(e, X, Y):
+                return rec(e, Y, X)
+            sols += _reducible_cubic_thue_mahler(Q, d1, d, S, rec23)
     return sols
 
 
-def _plus_odd_D0(d):
+def _plus_odd_class_number_non_coprime_to_three(d):
     r"""
-    k odd, plus case, d in _PLUS_ODD_D0: K = Q(sqrt(-d)) has 3 | h_K (Lemma
+    k odd, plus case, d in _PLUS_ODD_CLASS_NUMBER_NON_COPRIME_TO_THREE: K = Q(sqrt(-d)) has 3 | h_K (Lemma
     3.9).  Let P be a prime ideal generating the cyclic class group and write
     P^{h_K} = <a0 + b0 omega>.  For s = 0, 1, 2 set
         (a0 + b0 omega)^s = A_s + C_s omega,
