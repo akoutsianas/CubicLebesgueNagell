@@ -214,7 +214,7 @@ def _recover_sintegral(pt, phi, d, k0, sign):
 # --------------------------------------------------------------------- #
 # Section 2.3: reducible cubic forms via SUnitsSumSquare
 # --------------------------------------------------------------------- #
-def _reducible_cubic_23(Q, c, d, S, rec):
+def _reducible_cubic_thue_mahler(Q, c, d, S, rec):
     r"""
     Solve  X * Q(X, Y) = c*d^e  for coprime integers (X, Y), where Q is the
     quadratic form  Q(X, Y) = A X^2 + B X Y + C Y^2  with A, B, C in Z and
@@ -364,7 +364,7 @@ def _minus_even_case(d):
             return (x0, y0, d, k)
         return None
 
-    sols += _reducible_cubic_23(Q, ZZ(2), d, S, rec)
+    sols += _reducible_cubic_thue_mahler(Q, ZZ(2), d, S, rec)
     return sols
 
 
@@ -441,7 +441,7 @@ def _minus_odd_general(d):
 
             def rec23(e, X, Y):
                 return rec(e, Y, X)
-            sols += _reducible_cubic_23(Q, ZZ(d1), d, S, rec23)
+            sols += _reducible_cubic_thue_mahler(Q, ZZ(d1), d, S, rec23)
     return sols
 
 
@@ -484,7 +484,28 @@ def _minus_odd_d_79():
             (729, -68 * h + 605 * g, lambda H, G: 605 * H - 5372 * G, [1, 3, 9]),
         ):
             if len(F.factor()) != 1:
-                raise ValueError("For d=79 we get a reducible cubic form")
+                # Reducible only for s = t = 0 (Remark 3.5):
+                #     79^e = b (3 a^2 + 79 b^2).
+                # Section 2.3 with the linear factor X = b, Y = a.
+                Rq = F.parent()
+                aq, bq = Rq.gens()
+                qp = F / bq
+                Q = qp(bq, aq)
+
+                def rec23(e, X, Y, t=t, h=h, g=g, mult=mult, ynum=ynum):
+                    a0, b0 = Y, X
+                    k = 2 * e + 1
+                    ynum_v = ynum(h(a0, b0), g(a0, b0))
+                    if ynum_v % mult != 0:
+                        return None
+                    y0 = ynum_v / mult
+                    x0 = _cube_root(y0 ** 2 - d ** k)
+                    if x0 is not None:
+                        return (x0, y0, d, k)
+                    return None
+
+                sols += _reducible_cubic_thue_mahler(Q, ZZ(mult), d, S, rec23)
+                continue
             for sc in scales:
                 a_mult = mult / (sc ** 3)
                 if a_mult == 0:
@@ -557,7 +578,7 @@ def _plus_even_case(d):
             return None
         return (x0, y0, d, k)
 
-    sols += _reducible_cubic_23(Q1, ZZ(1), d, S, rec1)
+    sols += _reducible_cubic_thue_mahler(Q1, ZZ(1), d, S, rec1)
 
     q2 = aa ** 2 - 3 * bb ** 2           # a^2 - 3b^2;  cubic = a * q2
 
@@ -574,7 +595,7 @@ def _plus_even_case(d):
             return None
         return (x0, y0, d, k)
 
-    sols += _reducible_cubic_23(q2, ZZ(1), d, S, rec2)
+    sols += _reducible_cubic_thue_mahler(q2, ZZ(1), d, S, rec2)
     return sols
 
 
