@@ -663,8 +663,7 @@ def _plus_odd_general(d):
                 return None
             return (x0, y0, d, k)
 
-        nonconst = [pol for pol, _ in F.factor() if pol.degree() > 0]
-        if len(nonconst) == 1:
+        if len(F.factor()) != 1:
             # irreducible (always t != 0): cubic Thue-Mahler equation.
             f = F.numerator()
             c = F.denominator()
@@ -755,7 +754,34 @@ def _plus_odd_class_number_non_coprime_to_three(d):
             raise ValueError("A_s * D_s - B_s * C_s = 0!")
 
         F = A_s * gc - C_s * hc
-        if not F.is_irreducible():
+
+        if len(F.factor()) != 1:
+            # Reducible (always s = 0): F(a, b) = b * f2(a, b) / d1.  Swap so
+            # that the linear factor is the first variable and use
+            # Section 2.3.  The equation is  b * f2 = d1 * det * d^e.
+            Rq = F.parent()
+            aq, bq = Rq.gens()
+            if F % bq != 0:
+                raise ValueError("reducible case: b does not divide F")
+            q = Rq(F / bq)
+            d1 = lcm([cf.denominator() for cf in q.coefficients()])
+            f2 = d1 * q
+            Q = f2(bq, aq)
+
+            def rec23(e, X, Y):
+                a1, b1 = Y, X            # X = b, Y = a
+                k = 2 * e + 1
+                yK = (D_s * hc(a1, b1) - B_s * gc(a1, b1)) / det
+                y0 = QQ(yK)
+                if y0.denominator() != 1:
+                    return None
+                y0 = ZZ(y0)
+                x0 = _cube_root(y0 ** 2 + d ** k)
+                if x0 is None:
+                    return None
+                return (x0, y0, d, k)
+
+            sols += _reducible_cubic_thue_mahler(Q, d1 * det, d, S, rec23)
             continue
 
         max_m = ZZ(s * h / 3)
