@@ -724,14 +724,14 @@ def _plus_odd_class_number_non_coprime_to_three(d):
     h = Cl.order()
 
     P = None
-    p = ZZ(2)
+    q = ZZ(2)
     while P is None:
-        for Pc in K.ideal(p).prime_factors():
-            if not Cl(Pc).is_one():
+        for Pc in K.primes_above(q):
+            if Cl(Pc).order() == h:
                 P = Pc
                 break
-        p = next_prime(p)
-    pp = ZZ(P.smallest_integer())
+        q = next_prime(q)
+    p = ZZ(P.smallest_integer())
 
     alpha = (P ** h).gens_reduced()[0]
     a0, c0 = _to_basis(alpha, omega)
@@ -752,22 +752,21 @@ def _plus_odd_class_number_non_coprime_to_three(d):
         B_s, D_s = ZZ(round(B_s)), ZZ(round(D_s))
         det = A_s * D_s - B_s * C_s
         if det == 0:
-            continue
+            raise ValueError("A_s * D_s - B_s * C_s = 0!")
 
         F = A_s * gc - C_s * hc
         if not F.is_irreducible():
             continue
-        det_abs = abs(det)
-        if det < 0:
-            F = -F
 
         max_m = ZZ(s * h / 3)
         for m in range(int(max_m) + 1):
             p3 = p ** (3 * m)
-            if det_abs % p3 != 0:
+            if m > 0 and (d * det) % p != 0:
                 continue
-            a_mult = det_abs / p3
-            if a_mult == 0:
+            gcd_det_p3 = gcd(det, p3)
+            a_mult = det / gcd_det_p3
+            p3_rem = p3 / gcd_det_p3
+            if p3_rem != 1 and d % p != 0:
                 continue
             try:
                 tm_sols = ThueMahlerSolver(F, S, a=a_mult).solve()
@@ -777,7 +776,10 @@ def _plus_odd_class_number_non_coprime_to_three(d):
             for sol in tm_sols:
                 ap, bp = sol[0], sol[1]
                 a1, b1 = p ** m * ap, p ** m * bp
-                e = _tm_exponent(sol, d)
+                # The solver returns the S-unit  d^e / p3_rem, hence
+                #     d^e = p3_rem * prod q^z.
+                dk = prod(q ** z for q, z in sol[2].items())
+                e = _power_of_d_exponent(p3_rem * dk, d)
                 if e is None:
                     continue
                 k = 2 * e + 1
