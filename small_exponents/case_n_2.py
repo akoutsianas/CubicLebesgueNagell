@@ -212,7 +212,7 @@ def _recover_sintegral(pt, phi, d, k0, sign):
 
 
 # --------------------------------------------------------------------- #
-# Section 2.3: reducible cubic forms via SUnitsSumSquare
+# Section 2.3: reducible cubic forms via S-integral points (2.11)
 # --------------------------------------------------------------------- #
 def _reducible_cubic_thue_mahler(Q, c, d, S, rec):
     r"""
@@ -220,12 +220,18 @@ def _reducible_cubic_thue_mahler(Q, c, d, S, rec):
     quadratic form  Q(X, Y) = A X^2 + B X Y + C Y^2  with A, B, C in Z and
     the linear factor is always the first variable X.
 
-    Section 2.3: for F(X, Y) = Q(X, Y) the triple (F, X^2, 2 C Y + B X)
-    solves
-        (4 C) x + (B^2 - 4 A C) y = z^2,   x = F,  y = X^2,  z = 2 C Y + B X.
-    Writing m = gcd(4 C, B^2 - 4 A C) = m1 m2^2 (m1 squarefree) this becomes
-        (4 C / m2^2) x + ((B^2 - 4 A C) / m2^2) y = ((2 C Y + B X) / m2)^2,
-    a sum of two S-units being a square, solved with SUnitsSumSquare.
+    Section 2.3, alternative approach (eqs. (2.10)-(2.11)).  Write the S-unit
+    c d^e = D Z^3 with D cube-free (D depends only on e mod 3).  Then, for
+    (X, Y, Z) with X*Q(X, Y) = D*Z^3, the point
+
+        ( D C Z / X ,  C^2 D Y / X )
+
+    is an S-integral point of the elliptic curve
+
+        (2.11)   W^2 + B C D W = T^3 - A C^3 D^2
+                 ( W = C^2 D Y / X ,  T = D C Z / X ).
+
+    In particular  Y / X = W / (C^2 D), which recovers the primitive (X, Y).
 
     The caller must arrange that the actual linear factor is the first
     variable (swapping the variables if necessary).
@@ -234,59 +240,74 @@ def _reducible_cubic_thue_mahler(Q, c, d, S, rec):
     non-None return values are collected.
     """
     sols = []
-    if not USE_SUNITS_SUM_SQUARE:
-        return sols
     R = Q.parent()
     Xv, Yv = R.gens()
     A = ZZ(Q.monomial_coefficient(Xv ** 2))
     B = ZZ(Q.monomial_coefficient(Xv * Yv))
     C = ZZ(Q.monomial_coefficient(Yv ** 2))
     c = ZZ(c)
-
-    # (2.8) -> (2.9): reduce by the square part of the gcd of the coefficients.
-    a_eq = 4 * C
-    b_eq = B ** 2 - 4 * A * C
-    m = gcd(a_eq, b_eq)
-    m1 = m.squarefree_part()
-    m2sq = m / m1
-    m2 = m2sq.sqrt()
-    a = a_eq / (m1 * m2sq)
-    b = b_eq / (m1 * m2sq)
-    if a == 0 or b == 0 or C == 0:
+    if A == 0 or C == 0 or c == 0:
         return sols
 
-    # If c != 1 we enlarge S by the primes dividing c.
-    Sext = sorted(set(ZZ(p) for p in S) | {p for p in c.prime_factors()})
-    try:
-        ss_sols = SUnitsSumSquare(a, b, Sext).solve()
-    except Exception as e:
-        print(f"SUnitsSumSquare failed for reducible cubic: {e}")
-        return sols
+    # Only the primes of the S-unit c*d^e can occur in a denominator
+    # (the point is (D C Z / X, C^2 D Y / X) with X | c*d^e).
+    Sprime = sorted(set(ZZ(p) for p in S) | {ZZ(2)} | set(c.prime_factors()))
 
-    for (x0, y0, z0) in ss_sols:
-        # x0 = F(X, Y),  y0 = X^2,  z0 = (2 C Y + B X) / m2.
-        y0 = QQ(y0)
-        if y0 <= 0 or not y0.is_square():
+    found = set()
+    for r in range(3):
+        # cube-free part D of c * d^r  (so c*d^r = D * Z^3)
+        N = c * d ** r
+        sgn = 1 if N > 0 else -1
+        D = sgn * prod(q ** (a % 3) for q, a in ZZ(abs(N)).factor())
+        if D == 0:
             continue
-        T = y0.sqrt()
-        for Xsgn in (1, -1):
-            X = Xsgn * T
-            for zsgn in (1, -1):
-                Y = (m2 * zsgn * QQ(z0) - B * X) / (2 * C)
-                if X not in ZZ or Y not in ZZ:
+
+        # elliptic curve (2.11)
+        E = EllipticCurve([0, 0, B * C * D, 0, -A * C ** 3 * D ** 2])
+        Emin = E if E.is_minimal() else E.minimal_model()
+        phi = Emin.isomorphism_to(E)
+        Spts = list(Sprime)
+        for p in phi.u.denominator().prime_factors():
+            if p not in Spts:
+                Spts.append(p)
+
+        pts = None
+        try:
+            pts = Emin.S_integral_points(S=Spts)
+        except Exception:
+            for effort in (0, 2, 4):
+                try:
+                    mb = Emin.gens(algorithm="pari", pari_effort=effort)
+                    pts = Emin.S_integral_points(S=Spts, mw_base=mb)
+                    break
+                except Exception:
                     continue
-                X, Y = ZZ(X), ZZ(Y)
+        if pts is None:
+            print(f"S-integral points failed for reducible cubic (d={d}, D={D})")
+            continue
+
+        for pt in pts:
+            P = phi(pt)
+            W = QQ(P[1])
+            ratio = W / (C ** 2 * D)              # = Y / X
+            if ratio == 0:
+                continue
+            Y0 = ZZ(ratio.numerator())
+            X0 = ZZ(ratio.denominator())
+            for sg in (1, -1):
+                X, Y = sg * X0, sg * Y0
                 if gcd(X, Y) != 1:
                     continue
-                F = A * X**2 + B * X * Y + C * Y**2
-                if F != x0:
+                XF = X * (A * X ** 2 + B * X * Y + C * Y ** 2)
+                if XF % c != 0:
                     continue
-                XF = X * F
-                if XF <= 0 or XF % c != 0:
+                e = _power_of_d_exponent(XF // c, d)
+                if e is None or e % 3 != r:
                     continue
-                e = _power_of_d_exponent(XF / c, d)
-                if e is None:
+                key = (X, Y, e)
+                if key in found:
                     continue
+                found.add(key)
                 out = rec(e, X, Y)
                 if out is not None:
                     sols.append(out)
