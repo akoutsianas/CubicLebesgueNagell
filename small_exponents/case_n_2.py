@@ -974,10 +974,10 @@ def main(ncpu=1):
 
     def report(d, minus, plus, warnings):
         results[d] = (minus, plus, warnings)
-        print(f"d={d}: minus (y^2-d^k=x^3): {minus}")
-        print(f"       plus  (y^2+d^k=x^3): {plus}")
         for w in warnings:
             print(f"       WARNING: {w}")
+        print(f"d={d}: minus (y^2-d^k=x^3): {minus}")
+        print(f"       plus  (y^2+d^k=x^3): {plus}")
         if warnings:
             unsolved.append(d)
         sys.stdout.flush()
