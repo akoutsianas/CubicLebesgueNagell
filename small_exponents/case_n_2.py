@@ -32,10 +32,16 @@ For Thue-Mahler equations we use ThueMahlerSolver (Gherga-Siksek) and for
 equations a*x + b*y = z^2 with x, y S-units we use SUnitsSumSquare (de Weger).
 """
 
+import os
+import sys
+from multiprocessing import Pool
+import io
+import contextlib
+
+
 from sage.all import (EllipticCurve, ZZ, QQ, sqrt, prod, gcd, lcm,
                       QuadraticField, PolynomialRing, next_prime, oo)
 
-import sys
 sys.path.append("/home/akoutsianas/Sage/DiophantineSolvers")
 from thue_mahler_solver import ThueMahlerSolver
 from sunits_sum_square import SUnitsSumSquare
@@ -436,7 +442,8 @@ def _minus_odd_general(d):
                 return None
             return (x0, y0, d, k)
 
-        if f.is_irreducible():
+        nonconst = [pol for pol, _ in F.factor() if pol.degree() > 0]
+        if len(nonconst) == 1:
             try:
                 tm_sols = ThueMahlerSolver(f, S, a=c).solve()
             except Exception as e:
@@ -684,7 +691,8 @@ def _plus_odd_general(d):
                 return None
             return (x0, y0, d, k)
 
-        if len(F.factor()) != 1:
+        nonconst = [pol for pol, _ in F.factor() if pol.degree() > 0]
+        if len(nonconst) == 1:
             # irreducible (always t != 0): cubic Thue-Mahler equation.
             f = F.numerator()
             c = F.denominator()
@@ -850,15 +858,68 @@ def case_n_2(d):
     return _dedup(case_n_2_minus(d) + case_n_2_plus(d))
 
 
-def main():
-    for d in range(2, D_BOUND + 1):
-        if ZZ(d).is_perfect_power():
-            continue
-        minus = case_n_2_minus(d)
-        plus = case_n_2_plus(d)
+def _solve_d_worker(d):
+    r"""
+    Compute all solutions of y^2 -/+ d^k = x^3 for a single ``d`` and capture
+    the diagnostic messages printed when some sub-computation fails.
+
+    Returns ``(d, minus_solutions, plus_solutions, warnings)``.
+    """
+
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            minus = case_n_2_minus(d)
+            plus = case_n_2_plus(d)
+        err = None
+    except Exception as exc:                       # pragma: no cover
+        minus, plus, err = [], [], repr(exc)
+    warnings = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
+    if err is not None:
+        warnings.append(err)
+    return (d, minus, plus, warnings)
+
+
+def main(ncpu=1):
+    r"""
+    Run the ``n = 2`` case for every ``2 <= d <= D_BOUND`` that is not a
+    perfect power, using ``ncpu`` processes (``ncpu = None`` uses all cores).
+
+    Results are printed as soon as each ``d`` finishes; at the end the values
+    of ``d`` for which some sub-computation failed are listed.
+    """
+
+    if ncpu is None or ncpu < 1:
+        ncpu = 1
+    ds = [d for d in range(2, D_BOUND + 1) if not ZZ(d).is_perfect_power()]
+
+    unsolved = []
+    results = {}
+
+    def report(d, minus, plus, warnings):
+        results[d] = (minus, plus, warnings)
         print(f"d={d}: minus (y^2-d^k=x^3): {minus}")
         print(f"       plus  (y^2+d^k=x^3): {plus}")
+        for w in warnings:
+            print(f"       WARNING: {w}")
+        if warnings:
+            unsolved.append(d)
+        sys.stdout.flush()
+
+    if ncpu > 1:
+        with Pool(processes=ncpu) as pool:
+            for (d, minus, plus, warnings) in pool.imap_unordered(_solve_d_worker, ds):
+                report(d, minus, plus, warnings)
+    else:
+        for d in ds:
+            report(*_solve_d_worker(d))
+
+    print()
+    print(f"Number of d values: {len(ds)}")
+    print(f"Cases not fully solved: {sorted(unsolved)}")
+    return results
 
 
 if __name__ == "__main__":
-    main()
+    _ncpu = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+    main(ncpu=_ncpu)
