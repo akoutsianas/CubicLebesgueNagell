@@ -111,13 +111,13 @@ def _power_of_d_exponent(m, d):
     if m <= 0:
         return None
     if m == 1:
-        return 0
+        return ZZ(0)
     if not m.is_power_of(d):
         return None
     b, e = m.perfect_power()
     if b != d:
         return None
-    return e
+    return ZZ(e)
 
 
 def _cube_root(n):
@@ -133,7 +133,7 @@ def _cube_root(n):
     b, e = n.perfect_power()
     if e % 3 != 0:
         return None
-    return b ** (e / 3)
+    return ZZ(b) ** ZZ(e / 3)
 
 
 def _to_basis(alpha, omega):
@@ -241,10 +241,10 @@ def _recover_sintegral(pt, phi, d, k0, sign):
         return None
     if e2 % 2 != 0 or e3 % 3 != 0:
         return None
-    lam = e2 / 2
+    lam = ZZ(e2 / 2)
     x0 = ZZ(X.numerator())
     y0 = ZZ(Y.numerator())
-    k = 6 * lam + k0
+    k = ZZ(6 * lam + k0)
     if k < 1:
         return None
     if gcd(x0, y0) != 1:
