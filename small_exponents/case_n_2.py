@@ -28,13 +28,13 @@ for k even and k odd:
   - k odd  (plus): over Q(sqrt(-d)), Lemmas 3.8 (h_K coprime to 3) and 3.9
     (the twelve exceptional fields with 3 | h_K) give Thue-Mahler equations.
 
-For Thue-Mahler equations we use ThueMahlerSolver (Gherga-Siksek) and for
-equations a*x + b*y = z^2 with x, y S-units we use SUnitsSumSquare (de Weger).
+For the irreducible Thue-Mahler equations we use ThueMahlerSolver
+(Gherga-Siksek); the reducible ones are solved via the S-integral points of
+the elliptic curve (2.11) (Section 2.3).
 """
 
-import os
+import multiprocessing
 import sys
-from multiprocessing import Pool
 import io
 import contextlib
 
@@ -44,17 +44,12 @@ from sage.all import (EllipticCurve, ZZ, QQ, sqrt, prod, gcd, lcm,
 
 sys.path.append("/home/akoutsianas/Sage/DiophantineSolvers")
 from thue_mahler_solver import ThueMahlerSolver
-from sunits_sum_square import SUnitsSumSquare
 
 D_BOUND = 100
 
 # The twelve values of d for which Q(sqrt(-d)) has class number divisible by 3
 # (Lemma 3.9).
 _PLUS_ODD_CLASS_NUMBER_NON_COPRIME_TO_THREE = {23, 26, 29, 31, 38, 53, 59, 61, 83, 87, 89, 92}
-
-# Development flag.  The Section 2.3 branches (SUnitsSumSquare) are expensive;
-# while validating the pipeline we may skip them.
-USE_SUNITS_SUM_SQUARE = False
 
 
 # --------------------------------------------------------------------- #
@@ -907,7 +902,13 @@ def main(ncpu=1):
         sys.stdout.flush()
 
     if ncpu > 1:
-        with Pool(processes=ncpu) as pool:
+        # Python 3.14 changed the default start method on Linux to
+        # "forkserver", which re-imports the main module in each child and
+        # breaks when the code is run through ``sage -c`` (there is no proper
+        # __main__ module).  Sage's parallel machinery relies on fork, so use
+        # the fork context explicitly.
+        ctx = multiprocessing.get_context("fork")
+        with ctx.Pool(processes=ncpu) as pool:
             for (d, minus, plus, warnings) in pool.imap_unordered(_solve_d_worker, ds):
                 report(d, minus, plus, warnings)
     else:
