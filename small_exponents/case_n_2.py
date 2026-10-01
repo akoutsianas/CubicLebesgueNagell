@@ -34,7 +34,9 @@ the elliptic curve (2.11) (Section 2.3).
 """
 
 import multiprocessing
+import resource
 import sys
+import time
 import io
 import contextlib
 
@@ -905,14 +907,33 @@ def case_n_2(d):
     return _dedup(case_n_2_minus(d) + case_n_2_plus(d))
 
 
+def _cpu_seconds():
+    r"""
+    Total CPU seconds (user + system) used by this process and by the child
+    processes it has reaped so far.
+    """
+    me = resource.getrusage(resource.RUSAGE_SELF)
+    kids = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return me.ru_utime + me.ru_stime + kids.ru_utime + kids.ru_stime
+
+
+def _self_cpu_seconds():
+    r"""CPU seconds (user + system) used by this process alone."""
+    me = resource.getrusage(resource.RUSAGE_SELF)
+    return me.ru_utime + me.ru_stime
+
+
 def _solve_d_worker(d):
     r"""
     Compute all solutions of y^2 -/+ d^k = x^3 for a single ``d`` and capture
     the diagnostic messages printed when some sub-computation fails.
 
-    Returns ``(d, minus_solutions, plus_solutions, warnings)``.
+    Returns ``(d, minus_solutions, plus_solutions, warnings, cpu_seconds)``,
+    where ``cpu_seconds`` is the CPU time spent on this ``d`` (including child
+    processes such as ``mwrank``).
     """
 
+    cpu0 = _cpu_seconds()
     buf = io.StringIO()
     minus, plus = [], []
     with contextlib.redirect_stdout(buf):
@@ -927,7 +948,7 @@ def _solve_d_worker(d):
             else:
                 plus = sols
     warnings = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
-    return (d, minus, plus, warnings)
+    return (d, minus, plus, warnings, _cpu_seconds() - cpu0)
 
 
 def main(ncpu=1):
@@ -936,7 +957,12 @@ def main(ncpu=1):
     perfect power, using ``ncpu`` processes (``ncpu = None`` uses all cores).
 
     Results are printed as soon as each ``d`` finishes; at the end the values
-    of ``d`` for which some sub-computation failed are listed.
+    of ``d`` for which some sub-computation failed are listed, together with
+    the wall-clock time and the total CPU time (summed over all processes).
+
+    Since a single ``d`` may spawn ``mwrank`` subprocesses, every worker
+    reports the CPU it used (itself plus its children) and ``main`` sums those
+    figures, so the reported CPU time covers the whole computation.
     """
 
     if ncpu is None or ncpu < 1:
@@ -956,6 +982,10 @@ def main(ncpu=1):
             unsolved.append(d)
         sys.stdout.flush()
 
+    cpu_worker = 0.0
+    cpu_parent0 = _self_cpu_seconds()
+    t0 = time.perf_counter()
+
     if ncpu > 1:
         # Python 3.14 changed the default start method on Linux to
         # "forkserver", which re-imports the main module in each child and
@@ -964,15 +994,29 @@ def main(ncpu=1):
         # the fork context explicitly.
         ctx = multiprocessing.get_context("fork")
         with ctx.Pool(processes=ncpu) as pool:
-            for (d, minus, plus, warnings) in pool.imap_unordered(_solve_d_worker, ds):
+            for (d, minus, plus, warnings, cpu) in pool.imap_unordered(_solve_d_worker, ds):
+                cpu_worker += cpu
                 report(d, minus, plus, warnings)
+        # The workers report their own CPU (including mwrank subprocesses);
+        # add the parent's own time spent orchestrating them.
+        cpu_total = cpu_worker + (_self_cpu_seconds() - cpu_parent0)
     else:
         for d in ds:
-            report(*_solve_d_worker(d))
+            d, minus, plus, warnings, cpu = _solve_d_worker(d)
+            cpu_worker += cpu
+            report(d, minus, plus, warnings)
+        cpu_total = cpu_worker
+
+    real = time.perf_counter() - t0
 
     print()
     print(f"Number of d values: {len(ds)}")
     print(f"Cases not fully solved: {sorted(unsolved)}")
+    print(f"Processes used: {ncpu}")
+    print(f"Real time: {real:.2f} s")
+    print(f"CPU time:  {cpu_total:.2f} s")
+    if real > 0:
+        print(f"CPU/real:  {cpu_total / real:.2f}")
     return results
 
 
