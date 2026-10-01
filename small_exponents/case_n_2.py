@@ -66,6 +66,42 @@ def _dedup(sols):
     return sorted(out, key=lambda t: (t[2], t[0], t[1], t[3]))
 
 
+def _report_failure(reason, case=None, k=None, k0=None, info=""):
+    r"""
+    Print a uniform diagnostic whenever a sub-computation fails.
+
+    Only the arguments that are genuinely available where the failure occurs
+    are passed; the remaining ones stay ``None`` and are omitted from the
+    message.
+
+    INPUT:
+
+    - ``reason`` -- the method that failed, ``"S-integral points"`` or
+      ``"Thue-Mahler"``.
+    - ``case``   -- ``"minus"`` (``y^2 - d^k = x^3``) or ``"plus"``
+      (``y^2 + d^k = x^3``), or ``None``.
+    - ``k``      -- ``"even"``, ``"odd"`` or ``None``.
+    - ``k0``     -- a residue class, an iterable of residue classes, or
+      ``None``.
+    - ``info``   -- extra information (the equation or curve involved).
+
+    The single printed line is what :func:`main` collects as a warning.
+    """
+    parts = []
+    if case is not None:
+        parts.append(f"case={case}")
+    parts.append(f"reason={reason}")
+    if k is not None:
+        parts.append(f"k={k}")
+    if k0 is not None:
+        vals = sorted(k0) if isinstance(k0, (list, tuple, set, frozenset)) else [k0]
+        parts.append("k0=" + ",".join(str(v) for v in vals))
+    msg = "FAILED: " + ", ".join(parts)
+    if info:
+        msg += f" ({info})"
+    print(msg)
+
+
 def _power_of_d_exponent(m, d):
     r"""Return the integer e >= 0 with m == d^e, or None if no such e exists.
 
@@ -174,7 +210,13 @@ def _s_integral_points(d, sign):
                     continue
             if pts is None:
                 problematic.append(k0)
-                print(f"S-integral points failed for k0={k0}, sign={sign}.")
+                _report_failure(
+                    "S-integral points",
+                    case=("minus" if sign == 1 else "plus"),
+                    k=("even" if k0 % 2 == 0 else "odd"),
+                    k0=k0,
+                    info=f"Y^2 = X^3 {'+' if sign == 1 else '-'} {d}^{k0}",
+                )
                 continue
         for pt in pts:
             sol = _recover_sintegral(pt, phi, d, k0, sign)
@@ -239,6 +281,10 @@ def _reducible_cubic_thue_mahler(Q, c, d, S, rec):
 
     For each solution (e, X, Y) the callback ``rec(e, X, Y)`` is invoked; its
     non-None return values are collected.
+
+    This routine only knows ``d`` and the cube-free part ``D`` of ``c d^r``
+    (for ``r = 0, 1, 2``); it has no notion of the parity of ``k`` or of the
+    residue classes ``k0``, so its failure messages leave those unset.
     """
     sols = []
     R = Q.parent()
@@ -284,7 +330,8 @@ def _reducible_cubic_thue_mahler(Q, c, d, S, rec):
                 except Exception:
                     continue
         if pts is None:
-            print(f"S-integral points failed for reducible cubic (d={d}, D={D})")
+            _report_failure("S-integral points",
+                            info=f"reducible cubic (2.11), d={d}, D={D}")
             continue
 
         for pt in pts:
@@ -349,7 +396,8 @@ def _minus_even_case(d):
         try:
             tm_sols = ThueMahlerSolver(coeffs, S).solve()
         except Exception as e:
-            print(f"Thue-Mahler failed for minus even, coeffs={coeffs}: {e}")
+            _report_failure("Thue-Mahler", case="minus", k="even",
+                            info=f"d={d}, coeffs={coeffs}, {e}")
             continue
         for sol in tm_sols:
             x1, x2 = sol[0], sol[1]
@@ -442,7 +490,8 @@ def _minus_odd_general(d):
             try:
                 tm_sols = ThueMahlerSolver(f, S, a=c).solve()
             except Exception as e:
-                print(f"Thue-Mahler failed for minus odd, d={d}, t={t}: {e}")
+                _report_failure("Thue-Mahler", case="minus", k="odd",
+                                info=f"d={d}, t={t}, {e}")
                 continue
             for sol in tm_sols:
                 e = _tm_exponent(sol, d)
@@ -540,7 +589,8 @@ def _minus_odd_d_79():
                 try:
                     tm_sols = ThueMahlerSolver(F, S, a=a_mult).solve()
                 except Exception as e:
-                    print(f"Thue-Mahler failed for d=79, t={t}: {e}")
+                    _report_failure("Thue-Mahler", case="minus", k="odd",
+                                    info=f"d=79, t={t}, {e}")
                     continue
                 for sol in tm_sols:
                     ap, bp = sol[0], sol[1]
@@ -694,7 +744,8 @@ def _plus_odd_general(d):
             try:
                 tm_sols = ThueMahlerSolver(f, S, a=c).solve()
             except Exception as e:
-                print(f"Thue-Mahler failed for plus odd, d={d}, t={t}: {e}")
+                _report_failure("Thue-Mahler", case="plus", k="odd",
+                                info=f"d={d}, t={t}, {e}")
                 continue
             for sol in tm_sols:
                 e = _tm_exponent(sol, d)
@@ -821,7 +872,8 @@ def _plus_odd_class_number_non_coprime_to_three(d):
             try:
                 tm_sols = ThueMahlerSolver(F, S, a=a_mult).solve()
             except Exception as e:
-                print(f"Thue-Mahler failed for plus odd D0, d={d}, s={s}: {e}")
+                _report_failure("Thue-Mahler", case="plus", k="odd",
+                                info=f"d={d}, s={s}, {e}")
                 continue
             for sol in tm_sols:
                 ap, bp = sol[0], sol[1]
@@ -862,16 +914,19 @@ def _solve_d_worker(d):
     """
 
     buf = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(buf):
-            minus = case_n_2_minus(d)
-            plus = case_n_2_plus(d)
-        err = None
-    except Exception as exc:                       # pragma: no cover
-        minus, plus, err = [], [], repr(exc)
+    minus, plus = [], []
+    with contextlib.redirect_stdout(buf):
+        for case, fn in (("minus", case_n_2_minus), ("plus", case_n_2_plus)):
+            try:
+                sols = fn(d)
+            except Exception as exc:               # pragma: no cover
+                _report_failure("unexpected error", case=case, info=f"d={d}, " + repr(exc))
+                continue
+            if case == "minus":
+                minus = sols
+            else:
+                plus = sols
     warnings = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
-    if err is not None:
-        warnings.append(err)
     return (d, minus, plus, warnings)
 
 
