@@ -47,7 +47,7 @@ from sage.all import ZZ, QQ, EllipticCurve, PolynomialRing, gcd, prod
 sys.path.append("/home/akoutsianas/Sage/DiophantineSolvers")
 
 
-D_BOUND = 10
+D_BOUND = 100
 
 
 # --------------------------------------------------------------------- #
