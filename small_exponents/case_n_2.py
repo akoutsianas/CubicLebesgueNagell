@@ -104,6 +104,26 @@ def _report_failure(reason, case=None, k=None, k0=None, info=""):
     print(msg)
 
 
+def _binary_form_coeffs(F):
+    r"""
+    Coefficients of the binary form ``F(a, b)`` in the list convention used by
+    :class:`ThueMahlerSolver`.  If
+
+        F(a, b) = a0 a^d + a1 a^{d-1} b + ... + ad b^d,
+
+    return the list ``[a0, a1, ..., ad]``.
+
+    ``ThueMahlerSolver`` does not recognise a multivariate polynomial (its
+    internal ``isinstance(F, Polynomial)`` test is false for
+    ``MPolynomial``), and its univariate branch stores the coefficients in the
+    reverse order; we therefore always hand it this explicit list.
+    """
+    R = F.parent()
+    a, b = R.gens()
+    d = F.degree()
+    return [ZZ(F.coefficient({a: d - i, b: i})) for i in range(d + 1)]
+
+
 def _power_of_d_exponent(m, d):
     r"""Return the integer e >= 0 with m == d^e, or None if no such e exists.
 
@@ -490,7 +510,7 @@ def _minus_odd_general(d):
         nonconst = [pol for pol, _ in F.factor() if pol.degree() > 0]
         if len(nonconst) == 1:
             try:
-                tm_sols = ThueMahlerSolver(f, S, a=c).solve()
+                tm_sols = ThueMahlerSolver(_binary_form_coeffs(f), S, a=c).solve()
             except Exception as e:
                 _report_failure("Thue-Mahler", case="minus", k="odd",
                                 info=f"d={d}, t={t}, {e}")
@@ -589,7 +609,7 @@ def _minus_odd_d_79():
                 if a_mult == 0:
                     continue
                 try:
-                    tm_sols = ThueMahlerSolver(F, S, a=a_mult).solve()
+                    tm_sols = ThueMahlerSolver(_binary_form_coeffs(F), S, a=a_mult).solve()
                 except Exception as e:
                     _report_failure("Thue-Mahler", case="minus", k="odd",
                                     info=f"d=79, t={t}, {e}")
@@ -744,7 +764,7 @@ def _plus_odd_general(d):
             f = F.numerator()
             c = F.denominator()
             try:
-                tm_sols = ThueMahlerSolver(f, S, a=c).solve()
+                tm_sols = ThueMahlerSolver(_binary_form_coeffs(f), S, a=c).solve()
             except Exception as e:
                 _report_failure("Thue-Mahler", case="plus", k="odd",
                                 info=f"d={d}, t={t}, {e}")
@@ -872,7 +892,7 @@ def _plus_odd_class_number_non_coprime_to_three(d):
             if p3_rem != 1 and d % p != 0:
                 continue
             try:
-                tm_sols = ThueMahlerSolver(F, S, a=a_mult).solve()
+                tm_sols = ThueMahlerSolver(_binary_form_coeffs(F), S, a=a_mult).solve()
             except Exception as e:
                 _report_failure("Thue-Mahler", case="plus", k="odd",
                                 info=f"d={d}, s={s}, {e}")
