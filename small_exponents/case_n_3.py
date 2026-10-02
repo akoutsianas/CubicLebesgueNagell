@@ -38,6 +38,7 @@ and reports both the wall-clock and the total CPU time.
 import contextlib
 import io
 import multiprocessing
+import os
 import resource
 import sys
 import time
@@ -307,19 +308,54 @@ def _solve_d_worker(d):
     return (d, sols, warnings, _cpu_seconds() - cpu0)
 
 
+class _Tee:
+    r"""File-like object duplicating every write to several streams."""
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data):
+        for s in self.streams:
+            s.write(data)
+        return len(data)
+
+    def flush(self):
+        for s in self.streams:
+            s.flush()
+
+    def isatty(self):
+        return False
+
+
+def _log_path():
+    r"""Path of the ``.txt`` log stored next to this module."""
+    return os.path.splitext(os.path.abspath(__file__))[0] + ".txt"
+
+
 def main(ncpu=1):
     r"""
     Run the ``n = 3`` case for every ``2 <= d <= D_BOUND`` that is not a
     perfect power, using ``ncpu`` processes (``ncpu = None`` uses all cores).
 
-    Results are printed as soon as each ``d`` finishes; at the end the values
+    Results are printed in increasing order of ``d``; at the end the values
     of ``d`` for which some sub-computation failed are listed, together with
     the wall-clock time and the total CPU time (summed over all processes).
 
     Since a single ``d`` may spawn ``mwrank`` subprocesses, every worker
     reports the CPU it used (itself plus its children) and ``main`` sums those
     figures, so the reported CPU time covers the whole computation.
+
+    The printed output is additionally saved next to this module, in the file
+    ``case_n_3.txt``.
     """
+
+    with open(_log_path(), "w") as log:
+        with contextlib.redirect_stdout(_Tee(sys.stdout, log)):
+            return _run(ncpu)
+
+
+def _run(ncpu=1):
+    r"""Body of :func:`main`; see its docstring."""
 
     if ncpu is None or ncpu < 1:
         ncpu = 1
@@ -349,7 +385,8 @@ def main(ncpu=1):
         # the fork context explicitly.
         ctx = multiprocessing.get_context("fork")
         with ctx.Pool(processes=ncpu) as pool:
-            for (d, sols, warnings, cpu) in pool.imap_unordered(_solve_d_worker, ds):
+            # ``imap`` (not ``imap_unordered``) keeps the output ordered by d.
+            for (d, sols, warnings, cpu) in pool.imap(_solve_d_worker, ds):
                 cpu_worker += cpu
                 report(d, sols, warnings)
         # The workers report their own CPU (including mwrank subprocesses);
