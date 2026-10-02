@@ -240,7 +240,10 @@ def _s_integral_points(d, sign):
                     info=f"Y^2 = X^3 {'+' if sign == 1 else '-'} {d}^{k0}",
                 )
                 continue
-        for pt in pts:
+        # Sage's S_integral_points may return only one point of a pair
+        # {Q, -Q}; the set is closed under negation and the negation sends
+        # (x0, y0) -> (x0, -y0), so add the negatives explicitly.
+        for pt in list(pts) + [-Q for Q in pts]:
             sol = _recover_sintegral(pt, phi, d, k0, sign)
             if sol is not None:
                 sols.append(sol)
@@ -353,10 +356,10 @@ def _reducible_cubic_thue_mahler(Q, c, d, S, rec):
                     continue
         if pts is None:
             _report_failure("S-integral points",
-                            info=f"reducible cubic (2.11), d={d}, D={D}")
+                            info=f"reducible cubic (2.9), d={d}, D={D}, r={r}")
             continue
 
-        for pt in pts:
+        for pt in pts + [-Q for Q in pts]:
             P = phi(pt)
             W = QQ(P[1])
             ratio = W / (C ** 2 * D)              # = Y / X
