@@ -36,6 +36,7 @@ the elliptic curve (2.11) (Section 2.3).
 import multiprocessing
 import os
 import resource
+import signal
 import sys
 import time
 import io
@@ -53,6 +54,73 @@ D_BOUND = 100
 # The twelve values of d for which Q(sqrt(-d)) has class number divisible by 3
 # (Lemma 3.9).
 _PLUS_ODD_CLASS_NUMBER_NON_COPRIME_TO_THREE = {23, 26, 29, 31, 38, 53, 59, 61, 83, 87, 89, 92}
+
+# Wall-clock limit (in seconds) for one S-integral-points computation.
+# Can be overridden for testing with the environment variable
+# ``S_INTEGRAL_TIMEOUT``.
+S_INTEGRAL_TIMEOUT = int(os.environ.get("S_INTEGRAL_TIMEOUT", 30 * 60))
+
+# Curves whose S-integral points could not be computed, filled by the current
+# worker process (see :func:`_record_sip_failure`).
+_SIP_FAILURES = []
+
+
+class _Timeout(BaseException):
+    r"""Raised when a :func:`_time_limit` block runs out of time."""
+
+
+def _timeout_handler(signum, frame):
+    raise _Timeout()
+
+
+@contextlib.contextmanager
+def _time_limit(seconds):
+    r"""
+    Best-effort wall-clock limit for a block, using ``SIGALRM``.
+
+    This works on Unix in the main thread of a process (which is where the
+    ``multiprocessing`` workers run).  A signal cannot interrupt a single long
+    C-level computation, but it does interrupt the subprocess waits used by
+    ``mwrank`` and returns control to Python.
+
+    ``_Timeout`` derives from ``BaseException`` so that the broad
+    ``except Exception`` handlers used inside Sage do not swallow it.
+    """
+    if seconds is None or seconds <= 0 or not hasattr(signal, "SIGALRM"):
+        yield
+        return
+    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+    signal.setitimer(signal.ITIMER_REAL, float(seconds))
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+
+def _record_sip_failure(curve, d, k0=None, reason="failure", extra=""):
+    r"""
+    Record an elliptic curve whose S-integral points could not be computed.
+
+    The record keeps the curve (its printed equation and a-invariants), the
+    corresponding ``d`` and residue class ``k0`` (when available), and the
+    reason (timeout or failure).  The records are returned by
+    :func:`_solve_d_worker` and listed at the end of :func:`main`.
+    """
+    try:
+        ainvs = tuple(curve.a_invariants())
+    except Exception:
+        ainvs = None
+    rec = {
+        "curve": str(curve),
+        "ainvs": ainvs,
+        "d": int(d),
+        "k0": None if k0 is None else int(k0),
+        "reason": reason,
+        "extra": extra,
+    }
+    _SIP_FAILURES.append(rec)
+    return rec
 
 
 # --------------------------------------------------------------------- #
@@ -215,32 +283,42 @@ def _s_integral_points(d, sign):
         for p in phi.u.denominator().prime_factors():
             if p not in S:
                 S.append(p)
+        pts = None
+        timed_out = False
         try:
-            pts = E0min.S_integral_points(S=S)
-        except Exception:
-            # mwrank could not determine the Mordell-Weil basis: try to obtain
-            # it from PARI's ellrank (with increasing effort) and retry.
+            with _time_limit(S_INTEGRAL_TIMEOUT):
+                try:
+                    pts = E0min.S_integral_points(S=S)
+                except Exception:
+                    # mwrank could not determine the Mordell-Weil basis: try to
+                    # obtain it from PARI's ellrank (with increasing effort).
+                    for effort in (0, 2, 4):
+                        try:
+                            mw_base = E0min.gens(algorithm="pari", pari_effort=effort)
+                        except Exception:
+                            continue
+                        try:
+                            pts = E0min.S_integral_points(S=S, mw_base=mw_base)
+                            break
+                        except Exception:
+                            continue
+        except _Timeout:
+            timed_out = True
             pts = None
-            for effort in (0, 2, 4):
-                try:
-                    mw_base = E0min.gens(algorithm="pari", pari_effort=effort)
-                except Exception:
-                    continue
-                try:
-                    pts = E0min.S_integral_points(S=S, mw_base=mw_base)
-                    break
-                except Exception:
-                    continue
-            if pts is None:
-                problematic.append(k0)
-                _report_failure(
-                    "S-integral points",
-                    case=("minus" if sign == 1 else "plus"),
-                    k=("even" if k0 % 2 == 0 else "odd"),
-                    k0=k0,
-                    info=f"Y^2 = X^3 {'+' if sign == 1 else '-'} {d}^{k0}",
-                )
-                continue
+        if pts is None:
+            problematic.append(k0)
+            reason = (f"timeout after {S_INTEGRAL_TIMEOUT / 60:.0f} min"
+                      if timed_out else "failure")
+            _record_sip_failure(E0, d, k0, reason=reason,
+                                extra=f"minimal model {E0min}, S={list(S)}")
+            _report_failure(
+                "S-integral points" + (" (timeout)" if timed_out else ""),
+                case=("minus" if sign == 1 else "plus"),
+                k=("even" if k0 % 2 == 0 else "odd"),
+                k0=k0,
+                info=f"Y^2 = X^3 {'+' if sign == 1 else '-'} {d}^{k0}",
+            )
+            continue
         # Sage's S_integral_points may return only one point of a pair
         # {Q, -Q}; the set is closed under negation and the negation sends
         # (x0, y0) -> (x0, -y0), so add the negatives explicitly.
@@ -345,18 +423,29 @@ def _reducible_cubic_thue_mahler(Q, c, d, S, rec):
                 Spts.append(p)
 
         pts = None
+        timed_out = False
         try:
-            pts = Emin.S_integral_points(S=Spts)
-        except Exception:
-            for effort in (0, 2, 4):
+            with _time_limit(S_INTEGRAL_TIMEOUT):
                 try:
-                    mb = Emin.gens(algorithm="pari", pari_effort=effort)
-                    pts = Emin.S_integral_points(S=Spts, mw_base=mb)
-                    break
+                    pts = Emin.S_integral_points(S=Spts)
                 except Exception:
-                    continue
+                    for effort in (0, 2, 4):
+                        try:
+                            mb = Emin.gens(algorithm="pari", pari_effort=effort)
+                            pts = Emin.S_integral_points(S=Spts, mw_base=mb)
+                            break
+                        except Exception:
+                            continue
+        except _Timeout:
+            timed_out = True
+            pts = None
         if pts is None:
-            _report_failure("S-integral points",
+            reason = (f"timeout after {S_INTEGRAL_TIMEOUT / 60:.0f} min"
+                      if timed_out else "failure")
+            _record_sip_failure(
+                E, d, None, reason=reason,
+                extra=f"reducible cubic (2.9), D={D}, r={r}, minimal model {Emin}")
+            _report_failure("S-integral points" + (" (timeout)" if timed_out else ""),
                             info=f"reducible cubic (2.9), d={d}, D={D}, r={r}")
             continue
 
@@ -952,14 +1041,16 @@ def _solve_d_worker(d):
     Compute all solutions of y^2 -/+ d^k = x^3 for a single ``d`` and capture
     the diagnostic messages printed when some sub-computation fails.
 
-    Returns ``(d, minus_solutions, plus_solutions, warnings, cpu_seconds)``,
-    where ``cpu_seconds`` is the CPU time spent on this ``d`` (including child
-    processes such as ``mwrank``).
+    Returns ``(d, minus_solutions, plus_solutions, warnings, cpu_seconds,
+    failures)``, where ``cpu_seconds`` is the CPU time spent on this ``d``
+    (including child processes such as ``mwrank``) and ``failures`` lists the
+    elliptic curves whose S-integral points could not be computed.
     """
 
     cpu0 = _cpu_seconds()
     buf = io.StringIO()
     minus, plus = [], []
+    _SIP_FAILURES.clear()
     with contextlib.redirect_stdout(buf):
         for case, fn in (("minus", case_n_2_minus), ("plus", case_n_2_plus)):
             try:
@@ -972,7 +1063,8 @@ def _solve_d_worker(d):
             else:
                 plus = sols
     warnings = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
-    return (d, minus, plus, warnings, _cpu_seconds() - cpu0)
+    failures = list(_SIP_FAILURES)
+    return (d, minus, plus, warnings, _cpu_seconds() - cpu0, failures)
 
 
 class _Tee:
@@ -1031,14 +1123,17 @@ def _run(ncpu=1):
     unsolved = []
     results = {}
 
-    def report(d, minus, plus, warnings):
-        results[d] = (minus, plus, warnings)
+    failed_curves = []
+
+    def report(d, minus, plus, warnings, failures):
+        results[d] = (minus, plus, warnings, failures)
         for w in warnings:
             print(f"       WARNING: {w}")
         print(f"d={d}: minus (y^2-d^k=x^3): {minus}")
         print(f"       plus  (y^2+d^k=x^3): {plus}")
         if warnings:
             unsolved.append(d)
+        failed_curves.extend(failures)
         sys.stdout.flush()
 
     cpu_worker = 0.0
@@ -1054,17 +1149,17 @@ def _run(ncpu=1):
         ctx = multiprocessing.get_context("fork")
         with ctx.Pool(processes=ncpu) as pool:
             # ``imap`` (not ``imap_unordered``) keeps the output ordered by d.
-            for (d, minus, plus, warnings, cpu) in pool.imap(_solve_d_worker, ds):
+            for (d, minus, plus, warnings, cpu, failures) in pool.imap(_solve_d_worker, ds):
                 cpu_worker += cpu
-                report(d, minus, plus, warnings)
+                report(d, minus, plus, warnings, failures)
         # The workers report their own CPU (including mwrank subprocesses);
         # add the parent's own time spent orchestrating them.
         cpu_total = cpu_worker + (_self_cpu_seconds() - cpu_parent0)
     else:
         for d in ds:
-            d, minus, plus, warnings, cpu = _solve_d_worker(d)
+            d, minus, plus, warnings, cpu, failures = _solve_d_worker(d)
             cpu_worker += cpu
-            report(d, minus, plus, warnings)
+            report(d, minus, plus, warnings, failures)
         cpu_total = cpu_worker
 
     real = time.perf_counter() - t0
@@ -1072,6 +1167,16 @@ def _run(ncpu=1):
     print()
     print(f"Number of d values: {len(ds)}")
     print(f"Cases not fully solved: {sorted(unsolved)}")
+    if failed_curves:
+        print(f"S-integral points not computed for {len(failed_curves)} curve(s):")
+        for rec in sorted(failed_curves,
+                          key=lambda r: (r["d"], -1 if r["k0"] is None else r["k0"])):
+            k0 = "reducible" if rec["k0"] is None else rec["k0"]
+            extra = f" ({rec['extra']})" if rec["extra"] else ""
+            print(f"  d={rec['d']}, k0={k0}, curve: {rec['curve']}, "
+                  f"reason: {rec['reason']}{extra}")
+    else:
+        print("S-integral points computed for all curves.")
     print(f"Processes used: {ncpu}")
     print(f"Real time: {real:.2f} s")
     print(f"CPU time:  {cpu_total:.2f} s")
