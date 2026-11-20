@@ -36,7 +36,6 @@ the elliptic curve (2.11) (Section 2.3).
 import multiprocessing
 import os
 import resource
-import signal
 import sys
 import time
 import io
@@ -49,53 +48,34 @@ from sage.all import (EllipticCurve, ZZ, QQ, sqrt, prod, gcd, lcm,
 sys.path.append("/home/akoutsianas/Sage/DiophantineSolvers")
 from thue_mahler_solver import ThueMahlerSolver
 
+try:
+    from small_exponents.utils import s_integral_points
+except ImportError:  # run from inside small_exponents/
+    from utils import s_integral_points
+
 D_BOUND = 100
 
 # The twelve values of d for which Q(sqrt(-d)) has class number divisible by 3
 # (Lemma 3.9).
 _PLUS_ODD_CLASS_NUMBER_NON_COPRIME_TO_THREE = {23, 26, 29, 31, 38, 53, 59, 61, 83, 87, 89, 92}
 
-# Wall-clock limit (in seconds) for one S-integral-points computation.
-# Can be overridden for testing with the environment variable
-# ``S_INTEGRAL_TIMEOUT``.
-S_INTEGRAL_TIMEOUT = int(os.environ.get("S_INTEGRAL_TIMEOUT", 30 * 60))
+# Wall-clock limit (in seconds) for one S-integral-points computation,
+# once the Mordell-Weil basis is known (the basis computation has its own
+# limits, see :func:`utils.mordell_weil_basis`).  Default: 3 days.  Can be
+# overridden with the environment variable ``S_INTEGRAL_TIMEOUT``.
+S_INTEGRAL_TIMEOUT = int(os.environ.get("S_INTEGRAL_TIMEOUT", 3 * 24 * 60 * 60))
 
 # Curves whose S-integral points could not be computed, filled by the current
 # worker process (see :func:`_record_sip_failure`).
 _SIP_FAILURES = []
 
-
-class _Timeout(BaseException):
-    r"""Raised when a :func:`_time_limit` block runs out of time."""
-
-
-def _timeout_handler(signum, frame):
-    raise _Timeout()
-
-
-@contextlib.contextmanager
-def _time_limit(seconds):
-    r"""
-    Best-effort wall-clock limit for a block, using ``SIGALRM``.
-
-    This works on Unix in the main thread of a process (which is where the
-    ``multiprocessing`` workers run).  A signal cannot interrupt a single long
-    C-level computation, but it does interrupt the subprocess waits used by
-    ``mwrank`` and returns control to Python.
-
-    ``_Timeout`` derives from ``BaseException`` so that the broad
-    ``except Exception`` handlers used inside Sage do not swallow it.
-    """
-    if seconds is None or seconds <= 0 or not hasattr(signal, "SIGALRM"):
-        yield
-        return
-    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-    signal.setitimer(signal.ITIMER_REAL, float(seconds))
-    try:
-        yield
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, old_handler)
+# Label of the failing method in the warnings, for each status returned by
+# :func:`utils.s_integral_points`.
+_SIP_FAILURE_LABELS = {
+    "basis": "Mordell-Weil basis",
+    "timeout": "S-integral points (timeout)",
+    "failure": "S-integral points",
+}
 
 
 def _record_sip_failure(curve, d, k0=None, reason="failure", extra=""):
@@ -104,7 +84,8 @@ def _record_sip_failure(curve, d, k0=None, reason="failure", extra=""):
 
     The record keeps the curve (its printed equation and a-invariants), the
     corresponding ``d`` and residue class ``k0`` (when available), and the
-    reason (timeout or failure).  The records are returned by
+    reason (Mordell-Weil basis not determined, timeout or failure of the
+    S-integral points computation).  The records are returned by
     :func:`_solve_d_worker` and listed at the end of :func:`main`.
     """
     try:
@@ -283,36 +264,13 @@ def _s_integral_points(d, sign):
         for p in phi.u.denominator().prime_factors():
             if p not in S:
                 S.append(p)
-        pts = None
-        timed_out = False
-        try:
-            with _time_limit(S_INTEGRAL_TIMEOUT):
-                try:
-                    pts = E0min.S_integral_points(S=S)
-                except Exception:
-                    # mwrank could not determine the Mordell-Weil basis: try to
-                    # obtain it from PARI's ellrank (with increasing effort).
-                    for effort in (0, 2, 4):
-                        try:
-                            mw_base = E0min.gens(algorithm="pari", pari_effort=effort)
-                        except Exception:
-                            continue
-                        try:
-                            pts = E0min.S_integral_points(S=S, mw_base=mw_base)
-                            break
-                        except Exception:
-                            continue
-        except _Timeout:
-            timed_out = True
-            pts = None
+        pts, status, info = s_integral_points(E0min, S, timeout=S_INTEGRAL_TIMEOUT)
         if pts is None:
             problematic.append(k0)
-            reason = (f"timeout after {S_INTEGRAL_TIMEOUT / 60:.0f} min"
-                      if timed_out else "failure")
-            _record_sip_failure(E0, d, k0, reason=reason,
+            _record_sip_failure(E0, d, k0, reason=info,
                                 extra=f"minimal model {E0min}, S={list(S)}")
             _report_failure(
-                "S-integral points" + (" (timeout)" if timed_out else ""),
+                _SIP_FAILURE_LABELS[status],
                 case=("minus" if sign == 1 else "plus"),
                 k=("even" if k0 % 2 == 0 else "odd"),
                 k0=k0,
@@ -422,30 +380,12 @@ def _reducible_cubic_thue_mahler(Q, c, d, S, rec):
             if p not in Spts:
                 Spts.append(p)
 
-        pts = None
-        timed_out = False
-        try:
-            with _time_limit(S_INTEGRAL_TIMEOUT):
-                try:
-                    pts = Emin.S_integral_points(S=Spts)
-                except Exception:
-                    for effort in (0, 2, 4):
-                        try:
-                            mb = Emin.gens(algorithm="pari", pari_effort=effort)
-                            pts = Emin.S_integral_points(S=Spts, mw_base=mb)
-                            break
-                        except Exception:
-                            continue
-        except _Timeout:
-            timed_out = True
-            pts = None
+        pts, status, info = s_integral_points(Emin, Spts, timeout=S_INTEGRAL_TIMEOUT)
         if pts is None:
-            reason = (f"timeout after {S_INTEGRAL_TIMEOUT / 60:.0f} min"
-                      if timed_out else "failure")
             _record_sip_failure(
-                E, d, None, reason=reason,
-                extra=f"reducible cubic (2.9), D={D}, r={r}, minimal model {Emin}")
-            _report_failure("S-integral points" + (" (timeout)" if timed_out else ""),
+                E, d, None, reason=info,
+                extra=f"reducible cubic (2.9), D={D}, r={r}, minimal model {Emin}, S={Spts}")
+            _report_failure(_SIP_FAILURE_LABELS[status],
                             info=f"reducible cubic (2.9), d={d}, D={D}, r={r}")
             continue
 
