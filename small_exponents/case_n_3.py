@@ -60,7 +60,8 @@ D_BOUND = 100
 # once the Mordell-Weil basis is known (the basis computation has its own
 # limits, see :func:`utils.mordell_weil_basis`).  Default: 3 days.  Can be
 # overridden with the environment variable ``S_INTEGRAL_TIMEOUT``.
-S_INTEGRAL_TIMEOUT = int(os.environ.get("S_INTEGRAL_TIMEOUT", 3 * 24 * 60 * 60))
+days = 1
+S_INTEGRAL_TIMEOUT = int(os.environ.get("S_INTEGRAL_TIMEOUT", days * 24 * 60 * 60))
 
 # Curves whose S-integral points could not be computed, filled by the current
 # worker process (see :func:`_record_sip_failure`).
