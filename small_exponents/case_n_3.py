@@ -58,7 +58,7 @@ D_BOUND = 100
 
 # Wall-clock limit (in seconds) for one S-integral-points computation,
 # once the Mordell-Weil basis is known (the basis computation has its own
-# limits, see :func:`utils.mordell_weil_basis`).  Default: 3 days.  Can be
+# limits, see :func:`utils.mordell_weil_basis`).  Default: 1 day.  Can be
 # overridden with the environment variable ``S_INTEGRAL_TIMEOUT``.
 days = 1
 S_INTEGRAL_TIMEOUT = int(os.environ.get("S_INTEGRAL_TIMEOUT", days * 24 * 60 * 60))
@@ -200,8 +200,9 @@ def _reducible_cubic_thue_mahler(Q, c, d, S, rec):
     non-None return values are collected.
 
     This routine only knows ``d`` and the cube-free part ``D`` of ``c d^r``
-    (for ``r = 0, 1, 2``); it has no notion of the parity of ``k`` or of the
-    residue classes ``k0``, so its failure messages leave those unset.
+    (for ``r = 0, 1, 2``).  Since a solution of the curve for ``r`` has
+    exponent ``e = k`` with ``k = r (mod 3)``, the failures are recorded and
+    reported with ``k0 = r``; the parity of ``k`` is left unset.
     """
     sols = []
     R = Q.parent()
@@ -238,9 +239,9 @@ def _reducible_cubic_thue_mahler(Q, c, d, S, rec):
         pts, status, info = s_integral_points(Emin, Spts, timeout=S_INTEGRAL_TIMEOUT)
         if pts is None:
             _record_sip_failure(
-                E, d, None, reason=info,
+                E, d, r, reason=info,
                 extra=f"reducible cubic (3.26), D={D}, r={r}, minimal model {Emin}, S={Spts}")
-            _report_failure(_SIP_FAILURE_LABELS[status],
+            _report_failure(_SIP_FAILURE_LABELS[status], k0=r,
                             info=f"reducible cubic (3.26), d={d}, D={D}, r={r}")
             continue
 
